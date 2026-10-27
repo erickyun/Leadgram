@@ -94,8 +94,8 @@ jobs:
             DEB_FILE=$(ls resources/com.choco.tgextra_*.deb)
             VERSION=$(echo "$DEB_FILE" | sed -E 's/.*_([0-9]+\.[0-9]+\.[0-9]+)_iphoneos.*/\1/')
           elif [ "${{ inputs.tweak }}" = "iQTele" ]; then
-            DEB_FILE=$(ls resources/iQTele_*_iphoneos-arm64.deb)
-            VERSION=$(echo "$DEB_FILE" | sed -E 's/.*iQTele_([^_]+)_iphoneos.*/\1/')
+            DEB_FILE=$(ls resources/iQTele_*_rootless.deb)
+            VERSION=$(echo "$DEB_FILE" | sed -E 's/.*iQTele_([^_]+)_rootless.*/\1/')
           else
             echo "::error::Unknown tweak: ${{ inputs.tweak }}"
             exit 1
