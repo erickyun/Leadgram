@@ -40,7 +40,7 @@ The build system still supports multiple packages when the guard is explicitly
 overridden. No source code for the third-party bundled tweaks was changed.
 
 **Suggested isolation order (same decrypted base IPA and bundle ID):**
-1. Only Privacy Controls (all five privacy toggles OFF) — confirms standalone load.
+1. Only Privacy Controls (all six privacy toggles OFF) — confirms standalone load.
 2. Lead + Privacy Controls — tests the most relevant desired combination.
 3. TGExtra + Privacy Controls (without Lead) — tests TGExtra separately.
 4. iQTele + Privacy Controls (without Lead/TGExtra).
@@ -107,3 +107,26 @@ branch and toggle **Hide Names**, **Hide Reactions**, **Hide Comments**, and
 which chat type (group/channel/private), target element, and screenshot.
 The code has not yet been built or tested on an actual iPhone, and the runtime
 rules may need app-version-specific refinements.
+
+
+### Fix: group sender headers and avatars reappearing after navigation
+
+After feedback from the Telegram 13.1.1 build, the privacy code now:
+
+- Detects `TextNode` author labels placed directly under
+  `ChatMessageBubbleClippingNode`, without relying on the unavailable
+  `attributedText` selector. This specifically targets names above group messages.
+- Guards a previously hidden view against being unhidden during Telegram UI recycling
+  (hooks `UIView setHidden:` only to re-enforce previously marked views).
+- Rechecks views when inserted into the hierarchy and when a Telegram
+  navigation controller displays a screen again (`viewDidAppear:`).
+  This is meant to keep profile pictures hidden when entering and exiting
+  the same group/channel repeatedly.
+- Preserves independent Hide Sender Names / Hide Names / Hide Avatars switches,
+  and deliberately does not blank the actual message body.
+
+**Not device-verified:** these hooks are best-effort for Telegram 13.1.1.
+Use the same stable third-party tweak combination as your last working build.
+Test (1) names over messages in groups, (2) channel author/title labels,
+(3) avatar visibility after entering/leaving the same group or channel 3+
+times, and (4) switch each feature OFF and verify hidden views return.
