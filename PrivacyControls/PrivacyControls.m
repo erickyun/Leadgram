@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#include <stdlib.h>
 
 /// PrivacyControls is additive: it never modifies the Lead/TGExtra/iQTele binaries.
 /// Dynamic class/identifier matching is intentionally conservative. Telegram forks
@@ -162,16 +163,39 @@ static BOOL PGShouldHide(UIView *view) {
     // Avoid hiding arbitrary titles/captions and message text.
     if (PGEnabled[3] && nameHint && identityContext && !isMessage) return YES;
 
+    // The chat-list title is often an unnamed ASTextNode. Restrict this
+    // fallback to the top-left title region; never hide the message preview
+    // or the timestamp on the right side of the row.
+    if (PGEnabled[3] && !isMessage && PGContains(context, @"chatlistitem")) {
+        UIView *row = view.superview;
+        for (NSUInteger level = 0; row && level < 8; level++, row = row.superview) {
+            NSString *rowName = [NSString stringWithFormat:@"%@ %@",
+                                 PGClass(row), PGClass(PGNode(row))];
+            if (!PGContains(rowName, @"chatlistitemnode")) continue;
+            CGRect box = [view convertRect:view.bounds toView:row];
+            CGFloat width = CGRectGetWidth(row.bounds);
+            CGFloat height = CGRectGetHeight(row.bounds);
+            if (width > 0 && height > 0 && box.size.height > 5 && box.size.height < 36 &&
+                CGRectGetMidY(box) < height * 0.56 &&
+                CGRectGetMinX(box) > width * 0.12 &&
+                CGRectGetMinX(box) < width * 0.75) return YES;
+            break;
+        }
+    }
+
     return NO;
 }
 
 static void PGApply(UIView *view) {
     BOOL marked = [objc_getAssociatedObject(view, &PGHiddenMarker) boolValue];
     BOOL hide = PGShouldHide(view);
-    if (hide && !marked && !view.hidden) {
-        objc_setAssociatedObject(view, &PGHiddenMarker, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        view.hidden = YES;
-    } else if (!hide && marked) {
+    if (hide) {
+        if (!marked && !view.hidden) {
+            objc_setAssociatedObject(view, &PGHiddenMarker, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            marked = YES;
+        }
+        if (marked && !view.hidden) view.hidden = YES;
+    } else if (marked) {
         objc_setAssociatedObject(view, &PGHiddenMarker, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         view.hidden = NO;
     }
