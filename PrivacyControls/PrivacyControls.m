@@ -117,11 +117,21 @@ static NSString *PGIvarRole(id node) {
 static BOOL PGBubbleAuthorHeader(id node) {
     if (!node || !PGContains(PGClass(node), @"textnode")) return NO;
     id parent = PGInvokeObject(node, NSSelectorFromString(@"supernode"));
-    for (NSUInteger depth = 0; parent && depth < 4; depth++) {
+    for (NSUInteger depth = 0; parent && depth < 6; depth++) {
         NSString *name = PGClass(parent);
-        if (PGHasAny(name, @[@"contentnode", @"replyinfonode", @"forwardinfonode",
+        // The author's TextNode is a direct child of ChatMessageBubbleClippingNode.
+        // Most actual message text is under a dedicated ChatMessageBubbleContentNode.
+        if (PGContains(name, @"chatmessagebubbleclippingnode")) {
+            if (depth != 0) return NO;
+            // Exclude very small decorative rank/boost labels where identifiable.
+            id frameValue = PGInvokeObject(node, NSSelectorFromString(@"attributedText"));
+            NSString *label = [frameValue isKindOfClass:[NSAttributedString class]]
+                ? [frameValue string] : @"";
+            return label.length >= 2;
+        }
+        if (PGHasAny(name, @[@"bubblecontentnode", @"replyinfonode", @"forwardinfonode",
                              @"statusnode", @"threadinfonode", @"quotenode", @"dateandstatus"])) return NO;
-        if (PGContains(name, @"chatmessagebubbleitemnode")) return depth <= 1;
+        if (PGContains(name, @"chatmessagebubbleitemnode")) return NO;
         parent = PGInvokeObject(parent, NSSelectorFromString(@"supernode"));
     }
     return NO;
