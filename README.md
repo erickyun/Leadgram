@@ -17,17 +17,39 @@ Credits:
 
 Go to **Actions → Build IPA → Run workflow** and **select this feature branch**.
 Enter a direct URL to a decrypted IPA and choose the correct app.
-There are four independent GitHub Actions **boolean** inputs:
+There are four independent tweak inputs, plus an advanced unsafe-combination override:
 
 - **Lead** (default enabled)
 - **TGExtra** (default disabled)
 - **iQTele** (default disabled)
 - **Privacy Controls** (default enabled)
 
-You can select more than one. All selected .deb packages plus PrivacyControls
-(if enabled) are injected by cyan into the **same IPA**. Multiple independently
-developed tweaks may conflict; start by testing each one separately before
-enabling all three. No source code for the proprietary bundled tweaks is changed.
+**Safety guard (2026-10-29):** A crash report from Telegram 13.1.1, iOS 27.0.1,
+with Lead + TGExtra + iQTele loaded shows an uncaught Objective-C exception:
+`-[__NSArrayM insertObject:atIndex:]: object cannot be nil` on
+`org.mtproto.managerQueue`. The failing call chain enters `TGExtra.dylib`
+from `Lead.dylib`. The privacy dylib was loaded but does not appear in the
+crashing call chain. This strongly suggests a Lead/TGExtra interaction, but
+the exact underlying bug and standalone tweak compatibility are **not yet verified**.
+
+For now the workflow **rejects two or more of Lead/TGExtra/iQTele by default**.
+Select just one, plus **Privacy Controls** if desired. To deliberately run an
+unsafe compatibility experiment, enable `allow_unsafe_multi_tweak` in Actions.
+This may reproduce the crash and is **not recommended for daily use**.
+The build system still supports multiple packages when the guard is explicitly
+overridden. No source code for the third-party bundled tweaks was changed.
+
+**Suggested isolation order (same decrypted base IPA and bundle ID):**
+1. Only Privacy Controls (all five privacy toggles OFF) — confirms standalone load.
+2. Lead + Privacy Controls — tests the most relevant desired combination.
+3. TGExtra + Privacy Controls (without Lead) — tests TGExtra separately.
+4. iQTele + Privacy Controls (without Lead/TGExtra).
+5. Only after independent testing, cautiously try multi-tweak builds if needed.
+
+If reinstalling over an existing app, preserve the **exact same bundle identifier**
+and signing method. The supplied crash log uses `ph.telegra.Telegraphx`;
+the workflow's default Telegram bundle ID is `ph.telegra.Telegraph`.
+A different identifier creates a separate app rather than an in-place update.
 
 ### Privacy Controls: five toggles
 
