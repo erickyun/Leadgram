@@ -45,6 +45,12 @@ on:
         default: true
         required: true
 
+      allow_unsafe_multi_tweak:
+        description: "DANGEROUS: Allow multiple unverified tweaks (may crash at launch)"
+        type: boolean
+        default: false
+        required: true
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -59,6 +65,22 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+
+      - name: Guard against incompatible tweak combinations
+        shell: bash
+        run: |
+          set -euo pipefail
+          selected=()
+          if [[ "${{ inputs.lead }}" == "true" ]]; then selected+=("Lead"); fi
+          if [[ "${{ inputs.tgextra }}" == "true" ]]; then selected+=("TGExtra"); fi
+          if [[ "${{ inputs.iqtele }}" == "true" ]]; then selected+=("iQTele"); fi
+          if (( ${#selected[@]} > 1 )); then
+            if [[ "${{ inputs.allow_unsafe_multi_tweak }}" != "true" ]]; then
+              echo "::error::Crash isolation: multiple third-party tweaks selected (${selected[*]}). A Telegram 13.1.1 crash shows TGExtra calling through Lead on the MTProto queue. For safe testing select exactly ONE of Lead, TGExtra, iQTele; Privacy Controls can be independently enabled. To override this warning, explicitly enable allow_unsafe_multi_tweak (NOT recommended)."
+              exit 1
+            fi
+            echo "::warning::Unsafe experimental build! Multiple third-party tweaks selected: ${selected[*]}. Telegram may crash at startup."
+          fi
 
       - name: Resolve Bundle ID
         id: resolve
@@ -76,7 +98,7 @@ jobs:
       - name: Hide Sensitive Inputs
         uses: levibostian/action-hide-sensitive-inputs@v1
         with:
-          exclude_inputs: display_name,lead,tgextra,iqtele,privacy_controls
+          exclude_inputs: display_name,lead,tgextra,iqtele,privacy_controls,allow_unsafe_multi_tweak
 
       - name: Download and Validate IPA
         run: |
