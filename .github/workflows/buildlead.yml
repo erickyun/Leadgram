@@ -46,7 +46,7 @@ on:
         required: true
 
       privacy_controls:
-        description: "Inject Privacy Controls (avatar, names, usernames, reactions)"
+        description: "Inject Privacy Controls (avatars, names, reactions, comments)"
         type: boolean
         default: true
         required: true
