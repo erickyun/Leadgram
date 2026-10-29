@@ -135,6 +135,68 @@ static BOOL PGBubbleAuthorHeader(id node) {
     return YES;
 }
 
+// Distinguish the reply author heading from the quoted message's actual
+// preview text. In Telegram-iOS, ChatMessageReplyInfoNode.contentNode has
+// separate TextNodes for 'titleNode' (author) and 'textNode' (message preview).
+// The composer uses ReplyAccessoryPanelNode.titleNode (CompositeTextNode).
+static BOOL PGReplyAuthorTitle(id node) {
+    if (!node) return NO;
+    NSString *name = PGClass(node);
+    if (!PGContains(name, @"textnode")) return NO;
+
+    id parent = PGInvokeObject(node, NSSelectorFromString(@"supernode"));
+    NSString *parentName = PGClass(parent);
+    // The reply bar above the keyboard stores its title as a direct child.
+    if (PGContains(parentName, @"replyaccessorypanelnode")) {
+        return PGContains(name, @"compositetextnode");
+    }
+
+    // Message quote: title and message text sit under a shared contentNode,
+    // which is in turn owned by ChatMessageReplyInfoNode.
+    if (!parent || !PGContains(parentName, @"asdisplaynode")) return NO;
+    id grandparent = PGInvokeObject(parent, NSSelectorFromString(@"supernode"));
+    if (!PGContains(PGClass(grandparent), @"chatmessagereplyinfonode")) return NO;
+
+    // First choice: identify the title via a stored Swift/ObjC ivar, if this
+    // Telegram build exposes one. Never hide the 'textNode' body.
+    id storedTitle = nil;
+    for (Class cls = object_getClass(grandparent); cls && cls != [NSObject class]; cls = class_getSuperclass(cls)) {
+        unsigned int count = 0;
+        Ivar *ivars = class_copyIvarList(cls, &count);
+        for (unsigned int i = 0; i < count; i++) {
+            Ivar var = ivars[i];
+            const char *encoding = ivar_getTypeEncoding(var);
+            if (!encoding || encoding[0] != '@') continue;
+            NSString *ivarName = [NSString stringWithUTF8String:ivar_getName(var)].lowercaseString;
+            if (PGContains(ivarName, @"titlenode")) {
+                storedTitle = object_getIvar(grandparent, var);
+                break;
+            }
+        }
+        free(ivars);
+        if (storedTitle) break;
+    }
+    if (storedTitle) return storedTitle == node;
+
+    // Fallback for Swift-opaque storage: title is the upper, single-line
+    // TextNode and a distinct TextNode below it displays the message preview.
+    UIView *titleView = PGInvokeObject(node, NSSelectorFromString(@"view"));
+    if (![titleView isKindOfClass:[UIView class]]) return NO;
+    CGRect titleFrame = titleView.frame;
+    if (titleFrame.size.height < 6.0 || titleFrame.size.height > 45.0) return NO;
+    id children = PGInvokeObject(parent, NSSelectorFromString(@"subnodes"));
+    if (![children isKindOfClass:[NSArray class]]) return NO;
+    for (id sibling in (NSArray *)children) {
+        if (sibling == node || !PGContains(PGClass(sibling), @"textnode")) continue;
+        UIView *siblingView = PGInvokeObject(sibling, NSSelectorFromString(@"view"));
+        if (![siblingView isKindOfClass:[UIView class]]) continue;
+        CGRect otherFrame = siblingView.frame;
+        if (otherFrame.size.height >= 5.0 &&
+            otherFrame.origin.y > titleFrame.origin.y + 4.0) return YES;
+    }
+    return NO;
+}
+
 static BOOL PGShouldHide(UIView *view) {
     if (!(PGEnabled[0] || PGEnabled[1] || PGEnabled[2] || PGEnabled[3] || PGEnabled[4] || PGEnabled[5])) return NO;
     if (!view.window && ![view isKindOfClass:[UIWindow class]]) return NO;
@@ -178,6 +240,10 @@ static BOOL PGShouldHide(UIView *view) {
     if (PGEnabled[5] && PGHasAny(direct, @[@"chatmessagecommentfooter",
                @"chatmessagethreadinfonode", @"messagecommentbutton", @"postcommentbutton",
                @"commentfooter", @"discussionbutton", @"viewcommentsbutton"])) return YES;
+
+    // Hide reply-to person names with the existing sender/name toggles.
+    // The quoted message's body and its media remain visible.
+    if ((PGEnabled[1] || PGEnabled[3]) && PGReplyAuthorTitle(node)) return YES;
 
     if (!(PGEnabled[1] || PGEnabled[2] || PGEnabled[3])) return NO;
     if (!PGIsTextView(view, node)) return NO;
