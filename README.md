@@ -49,7 +49,11 @@ overridden. No source code for the third-party bundled tweaks was changed.
 If reinstalling over an existing app, preserve the **exact same bundle identifier**
 and signing method. The supplied crash log uses `ph.telegra.Telegraphx`;
 the workflow's default Telegram bundle ID is `ph.telegra.Telegraph`.
-A different identifier creates a separate app rather than an in-place update.
+Use the optional **bundle_id_override** input with `ph.telegra.Telegraphx`
+to build with the same identifier, provided that identifier is indeed the one
+installed on your device. A different identifier creates a separate app rather
+than an in-place update. Sign with the same certificate/profile if updating
+in place; always back up critical local-only data before replacing an IPA.
 
 ### Privacy Controls: five toggles
 
