@@ -59,7 +59,7 @@ in place; always back up critical local-only data before replacing an IPA.
 
 - **Hide Avatars** — hides known avatar/profile-picture UI components (not
   ordinary message photos and videos).
-- **Hide Sender Names** — hides identifiable message sender/author name nodes, including the `nameNode` directly under `ChatMessageBubbleItemNode`.
+- **Hide Sender Names** — hides identifiable message sender/author name nodes, including the `nameNode` directly under `ChatMessageBubbleItemNode`, the author title above a quoted/replied-to message, and the reply-to title in the message composer.
 - **Hide Usernames** — hides identifiable username labels and standalone
   `@handles` in profile/contact/search identity contexts (not message mentions).
 - **Hide Names** — hides identifiable display-name/title nodes in peer-related
@@ -130,3 +130,19 @@ Use the same stable third-party tweak combination as your last working build.
 Test (1) names over messages in groups, (2) channel author/title labels,
 (3) avatar visibility after entering/leaving the same group or channel 3+
 times, and (4) switch each feature OFF and verify hidden views return.
+
+### Reply-to author names (Telegram 13.1.1)
+
+The **Hide Sender Names** and **Hide Names** switches now also hide reply
+author titles in two distinct Telegram controls:
+
+- The title/author TextNode of `ChatMessageReplyInfoNode` within a message's
+  reply quote. The replied-to message **preview text and media stay visible**.
+- The `CompositeTextNode` title in `ReplyAccessoryPanelNode` above the
+  keyboard when composing a reply. Its message-preview text stays visible.
+
+The implementation first attempts to match the title via its stored node
+identity, falling back to the upper TextNode with a separate preview TextNode
+below it. It does not search for or remove matching names inside regular
+message bodies. This remains an untested-on-device runtime fix, so validate on
+both group replies and the input reply panel after rebuilding the IPA.
