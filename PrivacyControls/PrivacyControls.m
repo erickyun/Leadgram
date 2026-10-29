@@ -377,6 +377,23 @@ static void PGAttachGesture(UIWindow *window) {
 }
 @end
 
+@interface UIViewController (PGPrivacyNavigation)
+- (void)pg_privacyViewDidAppear:(BOOL)animated;
+@end
+@implementation UIViewController (PGPrivacyNavigation)
+- (void)pg_privacyViewDidAppear:(BOOL)animated {
+    [self pg_privacyViewDidAppear:animated];
+    // Navigation can recycle Telegram's cached avatar views without adding
+    // new subviews or running layout on the avatar itself. Re-apply the
+    // independent switches at the end of each completed presentation.
+    if ([NSThread isMainThread]) {
+        for (UIWindow *window in [UIApplication sharedApplication].windows) {
+            if (!window.hidden) PGRefreshView(window);
+        }
+    }
+}
+@end
+
 @interface UIWindow (PGPrivacyWindow)
 - (void)pg_privacyMakeKeyAndVisible;
 @end
@@ -400,6 +417,7 @@ static void PGInstall(void) {
     PGSwizzle([UIView class], @selector(didMoveToSuperview), @selector(pg_privacyDidMoveToSuperview));
     PGSwizzle([UIView class], @selector(didAddSubview:), @selector(pg_privacyDidAddSubview:));
     PGSwizzle([UIView class], @selector(setHidden:), @selector(pg_privacySetHidden:));
+    PGSwizzle([UIViewController class], @selector(viewDidAppear:), @selector(pg_privacyViewDidAppear:));
     PGSwizzle([UIWindow class], @selector(makeKeyAndVisible), @selector(pg_privacyMakeKeyAndVisible));
     dispatch_async(dispatch_get_main_queue(), ^{
         PGReload();
