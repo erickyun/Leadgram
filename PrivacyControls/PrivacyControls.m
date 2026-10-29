@@ -9,12 +9,12 @@
 /// change their internal node names; see README for the known coverage limitations.
 static NSString *const PGPrefix = @"LeadgramPrivacy.";
 static NSString *const PGKeys[] = {
-    @"hideAvatars", @"hideSenderNames", @"hideUsernames", @"hideNames", @"hideReactions"
+    @"hideAvatars", @"hideSenderNames", @"hideUsernames", @"hideNames", @"hideReactions", @"hideComments"
 };
 static NSString *const PGTitles[] = {
-    @"Hide Avatars", @"Hide Sender Names", @"Hide Usernames", @"Hide Names", @"Hide Reactions"
+    @"Hide Avatars", @"Hide Sender Names", @"Hide Usernames", @"Hide Names", @"Hide Reactions", @"Hide Comments"
 };
-static BOOL PGEnabled[5];
+static BOOL PGEnabled[6];
 static char PGHiddenMarker;
 static char PGGestureMarker;
 
@@ -110,23 +110,65 @@ static NSString *PGIvarRole(id node) {
     return @"";
 }
 
+// Chat-message author labels are TextNodes directly underneath the bubble
+// clipping node. Message body text is nested in a BubbleContentNode.
+// Recognize that structure instead of matching arbitrary displayed strings.
+static BOOL PGBubbleAuthorHeader(id node) {
+    if (!node || !PGContains(PGClass(node), @"textnode")) return NO;
+    id parent = PGInvokeObject(node, NSSelectorFromString(@"supernode"));
+    for (NSUInteger depth = 0; parent && depth < 4; depth++) {
+        NSString *name = PGClass(parent);
+        if (PGHasAny(name, @[@"contentnode", @"replyinfonode", @"forwardinfonode",
+                             @"statusnode", @"threadinfonode", @"quotenode", @"dateandstatus"])) return NO;
+        if (PGContains(name, @"chatmessagebubbleitemnode")) return depth <= 1;
+        parent = PGInvokeObject(parent, NSSelectorFromString(@"supernode"));
+    }
+    return NO;
+}
+
 static BOOL PGShouldHide(UIView *view) {
-    if (!(PGEnabled[0] || PGEnabled[1] || PGEnabled[2] || PGEnabled[3] || PGEnabled[4])) return NO;
+    if (!(PGEnabled[0] || PGEnabled[1] || PGEnabled[2] || PGEnabled[3] || PGEnabled[4] || PGEnabled[5])) return NO;
     if (!view.window && ![view isKindOfClass:[UIWindow class]]) return NO;
 
     id node = PGNode(view);
     NSString *direct = PGDirectHint(view, node);
 
-    // Avatar/media rules deliberately do not match generic UIImageView; this
-    // prevents concealing photos, videos, stickers and message attachments.
+    // Telegram uses AvatarNode, AnimatedAvatarSetNode and newer AvatarComponent
+    // variants. Never blanket-hide UIImageView: that would erase media/stickers.
     if (PGEnabled[0] && PGHasAny(direct, @[@"avatarnode", @"avatarview",
                 @"avatarimageview", @"avatarcontrol", @"peeravatar", @"profileavatar",
-                @"peerphoto", @"profilephoto", @"participantavatar"])) return YES;
+                @"peerphoto", @"profilephoto", @"participantavatar", @"animatedavatarset",
+                @"avatarcomponent", @"avatarstack", @"memberavatar", @"storyavatar",
+                @"chatavatar", @"useravatar", @"peerphotoimage"])) return YES;
 
-    // Hide only the reaction's dedicated component, not the entire chat bubble.
+    // Some forked chat/contact lists use a plain circular UIImageView rather
+    // than AvatarNode. Only use geometry inside clearly identified identity rows.
+    if (PGEnabled[0] && [view isKindOfClass:[UIImageView class]]) {
+        CGRect bounds = view.bounds;
+        CGFloat edge = MIN(bounds.size.width, bounds.size.height);
+        BOOL smallSquare = edge >= 24.0 && edge <= 110.0 &&
+            fabs(bounds.size.width - bounds.size.height) <= edge * 0.13;
+        BOOL circle = view.layer.cornerRadius >= edge * 0.35 || view.layer.mask != nil;
+        if (smallSquare && circle) {
+            NSString *ctx = PGContextHint(view, node);
+            if (PGHasAny(ctx, @[@"chatlistitemnode", @"contactlist", @"peerlistitem",
+                                @"searchresult", @"memberlist", @"participantlist"])) {
+                return YES;
+            }
+        }
+    }
+
+    // Telegram has standalone reaction buttons and footer nodes; do not hide
+    // the enclosing message, status/date node, or unrelated emoji in its text.
     if (PGEnabled[4] && PGContains(direct, @"reaction") &&
         PGHasAny(direct, @[@"button", @"footer", @"container", @"list", @"counter",
-                          @"panel", @"badge", @"node", @"view", @"item"])) return YES;
+                          @"panel", @"badge", @"node", @"view", @"item", @"component"])) return YES;
+
+    // Channel post comment/footer links are separate from reaction controls.
+    // ChatMessageThreadInfoNode is the message reply/thread entry button.
+    if (PGEnabled[5] && PGHasAny(direct, @[@"chatmessagecommentfooter",
+               @"chatmessagethreadinfonode", @"messagecommentbutton", @"postcommentbutton",
+               @"commentfooter", @"discussionbutton", @"viewcommentsbutton"])) return YES;
 
     if (!(PGEnabled[1] || PGEnabled[2] || PGEnabled[3])) return NO;
     if (!PGIsTextView(view, node)) return NO;
@@ -138,10 +180,15 @@ static BOOL PGShouldHide(UIView *view) {
         @"chatlistsearch", @"peerlist", @"gallerytitle", @"chatmessage"]);
     BOOL isMessage = PGContains(context, @"chatmessage");
 
+    // The author label in ChatMessageBubbleItemNode is actually stored as
+    // 'nameNode' (not 'senderNameNode'). Both Hide Names and Hide Sender Names
+    // must be able to conceal it, without touching actual message text.
+    BOOL bubbleHeader = isMessage && PGBubbleAuthorHeader(node);
     BOOL senderHint = [role isEqualToString:@"sender"] ||
+        (isMessage && [role isEqualToString:@"name"]) || bubbleHeader ||
         PGHasAny(direct, @[@"sendername", @"authorname", @"forwardedfrom", @"messageauthor"]);
-    if (PGEnabled[1] && senderHint && (isMessage || PGContains(context, @"gallery") ||
-                                             PGContains(context, @"message"))) return YES;
+    if ((PGEnabled[1] || PGEnabled[3]) && senderHint &&
+        (isMessage || PGContains(context, @"gallery") || PGContains(context, @"message"))) return YES;
 
     BOOL userHint = [role isEqualToString:@"username"] ||
         PGHasAny(direct, @[@"username", @"userhandle", @"peerhandle"]);
@@ -208,7 +255,7 @@ static void PGRefreshView(UIView *view) {
 
 static void PGReload(void) {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    for (int i = 0; i < 5; i++) PGEnabled[i] = [defaults boolForKey:[PGPrefix stringByAppendingString:PGKeys[i]]];
+    for (int i = 0; i < 6; i++) PGEnabled[i] = [defaults boolForKey:[PGPrefix stringByAppendingString:PGKeys[i]]];
     for (UIWindow *window in [UIApplication sharedApplication].windows) PGRefreshView(window);
 }
 
@@ -231,7 +278,7 @@ static void PGShowMenu(UIWindow *window) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Privacy Controls"
         message:@"Toggle visibility. Open this menu with a three-finger long press."
         preferredStyle:UIAlertControllerStyleAlert];
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 6; i++) {
         NSString *title = [NSString stringWithFormat:@"%@ %@",
                            PGEnabled[i] ? @"✓" : @"○", PGTitles[i]];
         NSInteger index = i;
@@ -282,10 +329,17 @@ static void PGAttachGesture(UIWindow *window) {
 
 @interface UIView (PGPrivacyLayout)
 - (void)pg_privacyLayoutSubviews;
+- (void)pg_privacyDidMoveToWindow;
 @end
 @implementation UIView (PGPrivacyLayout)
 - (void)pg_privacyLayoutSubviews {
     [self pg_privacyLayoutSubviews];
+    PGApply(self);
+}
+- (void)pg_privacyDidMoveToWindow {
+    [self pg_privacyDidMoveToWindow];
+    // A node may finish its initial layout before it is in a UIWindow.
+    // Check once attached, not just during the first layout pass.
     PGApply(self);
 }
 @end
@@ -309,6 +363,7 @@ static void PGSwizzle(Class cls, SEL original, SEL replacement) {
 __attribute__((constructor))
 static void PGInstall(void) {
     PGSwizzle([UIView class], @selector(layoutSubviews), @selector(pg_privacyLayoutSubviews));
+    PGSwizzle([UIView class], @selector(didMoveToWindow), @selector(pg_privacyDidMoveToWindow));
     PGSwizzle([UIWindow class], @selector(makeKeyAndVisible), @selector(pg_privacyMakeKeyAndVisible));
     dispatch_async(dispatch_get_main_queue(), ^{
         PGReload();
