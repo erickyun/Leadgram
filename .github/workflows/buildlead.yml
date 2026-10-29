@@ -21,6 +21,12 @@ on:
           - Vartagram
           - Nagram
 
+      bundle_id_override:
+        description: "Optional installed bundle ID (e.g. ph.telegra.Telegraphx)"
+        required: false
+        type: string
+        default: ""
+
       lead:
         description: "Inject Lead"
         type: boolean
@@ -84,6 +90,8 @@ jobs:
 
       - name: Resolve Bundle ID
         id: resolve
+        env:
+          CUSTOM_BUNDLE_ID: ${{ inputs.bundle_id_override }}
         run: |
           case "${{ inputs.display_name }}" in
             "Telegram")   BUNDLE_ID="ph.telegra.Telegraph" ;;
@@ -93,7 +101,15 @@ jobs:
             "Vartagram")  BUNDLE_ID="org.cpartisans.vartagram" ;;
             "Nagram")     BUNDLE_ID="xyz.nextalone.nagram" ;;
           esac
-          echo "bundle_id=$BUNDLE_ID" >> $GITHUB_OUTPUT
+          if [[ -n "$CUSTOM_BUNDLE_ID" ]]; then
+            if [[ ! "$CUSTOM_BUNDLE_ID" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]; then
+              echo "::error::Invalid bundle ID; use letters, digits, periods and hyphens."
+              exit 1
+            fi
+            BUNDLE_ID="$CUSTOM_BUNDLE_ID"
+          fi
+          echo "Selected bundle ID: $BUNDLE_ID"
+          echo "bundle_id=$BUNDLE_ID" >> "$GITHUB_OUTPUT"
 
       - name: Hide Sensitive Inputs
         uses: levibostian/action-hide-sensitive-inputs@v1
