@@ -116,25 +116,23 @@ static NSString *PGIvarRole(id node) {
 // Recognize that structure instead of matching arbitrary displayed strings.
 static BOOL PGBubbleAuthorHeader(id node) {
     if (!node || !PGContains(PGClass(node), @"textnode")) return NO;
+    // ChatMessageBubbleItemNode.swift: nameNode is a TextNode directly attached
+    // to ChatMessageBubbleClippingNode. TextNode does not necessarily expose
+    // -attributedText in all Telegram builds, so never require text inspection.
     id parent = PGInvokeObject(node, NSSelectorFromString(@"supernode"));
-    for (NSUInteger depth = 0; parent && depth < 6; depth++) {
-        NSString *name = PGClass(parent);
-        // The author's TextNode is a direct child of ChatMessageBubbleClippingNode.
-        // Most actual message text is under a dedicated ChatMessageBubbleContentNode.
-        if (PGContains(name, @"chatmessagebubbleclippingnode")) {
-            if (depth != 0) return NO;
-            // Exclude very small decorative rank/boost labels where identifiable.
-            id frameValue = PGInvokeObject(node, NSSelectorFromString(@"attributedText"));
-            NSString *label = [frameValue isKindOfClass:[NSAttributedString class]]
-                ? [frameValue string] : @"";
-            return label.length >= 2;
-        }
-        if (PGHasAny(name, @[@"bubblecontentnode", @"replyinfonode", @"forwardinfonode",
-                             @"statusnode", @"threadinfonode", @"quotenode", @"dateandstatus"])) return NO;
-        if (PGContains(name, @"chatmessagebubbleitemnode")) return NO;
-        parent = PGInvokeObject(parent, NSSelectorFromString(@"supernode"));
-    }
-    return NO;
+    if (!PGContains(PGClass(parent), @"chatmessagebubbleclippingnode")) return NO;
+    UIView *label = PGInvokeObject(node, NSSelectorFromString(@"view"));
+    UIView *container = PGInvokeObject(parent, NSSelectorFromString(@"view"));
+    if (![label isKindOfClass:[UIView class]] || ![container isKindOfClass:[UIView class]]) return NO;
+    CGRect rect = label.frame;
+    CGFloat width = container.bounds.size.width;
+    CGFloat height = container.bounds.size.height;
+    // Names, including one-character sender names, are single-line text.
+    // Chat message bodies are housed in separate BubbleContentNode descendants.
+    if (rect.size.width < 4.0 || rect.size.height < 8.0 || rect.size.height > 38.0) return NO;
+    if (width > 0 && (rect.origin.x < -8.0 || rect.origin.x > width * 0.85)) return NO;
+    if (height > 0 && (rect.origin.y < -4.0 || rect.origin.y > MIN(100.0, height * 0.55))) return NO;
+    return YES;
 }
 
 static BOOL PGShouldHide(UIView *view) {
@@ -194,12 +192,13 @@ static BOOL PGShouldHide(UIView *view) {
     // The author label in ChatMessageBubbleItemNode is actually stored as
     // 'nameNode' (not 'senderNameNode'). Both Hide Names and Hide Sender Names
     // must be able to conceal it, without touching actual message text.
-    BOOL bubbleHeader = isMessage && PGBubbleAuthorHeader(node);
+    BOOL bubbleHeader = PGBubbleAuthorHeader(node);
     BOOL senderHint = [role isEqualToString:@"sender"] ||
         (isMessage && [role isEqualToString:@"name"]) || bubbleHeader ||
         PGHasAny(direct, @[@"sendername", @"authorname", @"forwardedfrom", @"messageauthor"]);
     if ((PGEnabled[1] || PGEnabled[3]) && senderHint &&
-        (isMessage || PGContains(context, @"gallery") || PGContains(context, @"message"))) return YES;
+        (bubbleHeader || isMessage || PGContains(context, @"gallery") ||
+         PGContains(context, @"message"))) return YES;
 
     BOOL userHint = [role isEqualToString:@"username"] ||
         PGHasAny(direct, @[@"username", @"userhandle", @"peerhandle"]);
@@ -341,6 +340,9 @@ static void PGAttachGesture(UIWindow *window) {
 @interface UIView (PGPrivacyLayout)
 - (void)pg_privacyLayoutSubviews;
 - (void)pg_privacyDidMoveToWindow;
+- (void)pg_privacyDidMoveToSuperview;
+- (void)pg_privacyDidAddSubview:(UIView *)subview;
+- (void)pg_privacySetHidden:(BOOL)hidden;
 @end
 @implementation UIView (PGPrivacyLayout)
 - (void)pg_privacyLayoutSubviews {
@@ -349,9 +351,29 @@ static void PGAttachGesture(UIWindow *window) {
 }
 - (void)pg_privacyDidMoveToWindow {
     [self pg_privacyDidMoveToWindow];
-    // A node may finish its initial layout before it is in a UIWindow.
-    // Check once attached, not just during the first layout pass.
     PGApply(self);
+}
+- (void)pg_privacyDidMoveToSuperview {
+    [self pg_privacyDidMoveToSuperview];
+    PGApply(self);
+}
+- (void)pg_privacyDidAddSubview:(UIView *)subview {
+    [self pg_privacyDidAddSubview:subview];
+    // Chat list / profile components can be attached *after* their layout
+    // finished. Re-evaluate at insertion time instead of waiting for relayout.
+    if (subview.window) PGApply(subview);
+}
+- (void)pg_privacySetHidden:(BOOL)hidden {
+    // Telegram often explicitly unhides/recycles the same AvatarNode when a
+    // conversation is reopened. Do not allow a marked, still-targeted view
+    // to become visible. No recursion: the swapped selector below calls
+    // UIKit's original implementation directly.
+    if (!hidden && objc_getAssociatedObject(self, &PGHiddenMarker) &&
+        [NSThread isMainThread] && PGShouldHide(self)) {
+        [self pg_privacySetHidden:YES];
+        return;
+    }
+    [self pg_privacySetHidden:hidden];
 }
 @end
 
@@ -375,6 +397,9 @@ __attribute__((constructor))
 static void PGInstall(void) {
     PGSwizzle([UIView class], @selector(layoutSubviews), @selector(pg_privacyLayoutSubviews));
     PGSwizzle([UIView class], @selector(didMoveToWindow), @selector(pg_privacyDidMoveToWindow));
+    PGSwizzle([UIView class], @selector(didMoveToSuperview), @selector(pg_privacyDidMoveToSuperview));
+    PGSwizzle([UIView class], @selector(didAddSubview:), @selector(pg_privacyDidAddSubview:));
+    PGSwizzle([UIView class], @selector(setHidden:), @selector(pg_privacySetHidden:));
     PGSwizzle([UIWindow class], @selector(makeKeyAndVisible), @selector(pg_privacyMakeKeyAndVisible));
     dispatch_async(dispatch_get_main_queue(), ^{
         PGReload();
