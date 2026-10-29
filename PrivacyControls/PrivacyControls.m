@@ -3,6 +3,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #include <stdlib.h>
+#include <math.h>
 
 /// PrivacyControls is additive: it never modifies the Lead/TGExtra/iQTele binaries.
 /// Dynamic class/identifier matching is intentionally conservative. Telegram forks
